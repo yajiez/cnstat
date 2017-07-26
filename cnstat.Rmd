@@ -1,0 +1,335 @@
+---
+title: "China Statistical Data"
+runtime: shiny
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    social: menu
+    theme: simplex
+    css: static/css/style.css
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(leaflet)
+library(viridis)
+library(highcharter)
+library(dplyr)
+library(magrittr)
+library(lubridate)
+
+#--Read in Data-----------------------------------------------------
+
+# map data
+CHN_adm1 <- readRDS('data/CHN_adm1.rds') #rmapshaper::ms_simplify
+TWN_adm0 <- readRDS('data/TWN_adm0.rds') #rmapshaper::ms_simplify
+correct_name <- function(s){
+    if (s == 'Nei Mongol') {
+        return('Inner Mongolia')
+    } else if (s == 'Ningxia Hui') {
+        return('Ningxia')
+    } else if (s == 'Xinjiang Uygur') {
+        return('Xinjiang')
+    } else if (s == 'Xizang') {
+        return('Tibet')
+    } else {
+        return(s)
+    }
+}
+CHN_adm1$NAME_1 <- as.character(lapply(CHN_adm1$NAME_1, correct_name))
+
+# metadata
+regions <- readRDS('data/regions.rds')
+indicators <- readRDS('data/indicators.rds')
+
+# full data
+dat <- readRDS('data/dat.rds')
+dat %<>% mutate(Quarter = stringi::stri_sub(time_period, -1),
+                Year = stringi::stri_sub(time_period, 1, 4))
+dat$Month <- as.character(lapply(dat$Quarter, function(s){
+    switch(s, A = '0301', B = '0601', C = '0901', D = '1201')
+}))
+dat$Quarter <- as.character(lapply(dat$Quarter, function(s){
+    switch(s, A = 'Q1', B = 'Q2', C = 'Q3', D = 'Q4')
+}))
+dat$time_period <- paste(dat$Year, dat$Quarter, sep = ' - ')
+dat$ymd <- ymd(paste(dat$Year, dat$Month, sep = ''))
+
+#--Select Data------------------------------------------------------
+dat_ind <- reactive({
+  validate(need(input$ind != "", "Loading the page..."))
+  dat %>% filter(indicator_code == input$ind)
+})
+```
+
+Sidebar {.sidebar}
+======================================================================
+
+**Overall Settings**
+
+```{r}
+# Define inputs
+output$ind_group <- renderUI({
+  ind_group <-
+    indicators %>% 
+    subset(select = c('indicator_group_ename', 'indicator_group_code')) %>%
+    unique() %>%
+    (function(x) {
+      y <- x$indicator_group_code
+      names(y) <- x$indicator_group_ename
+      return(y)
+    }) %>% sort()
+  selectInput(
+    'ind_group',
+    label = 'Select an Indicator Group',
+    choices = ind_group
+  )
+})
+uiOutput('ind_group')
+
+output$ind_class <- renderUI({
+  validate(need(input$ind_group != "", "Loading the page..."))
+  ind_class <- indicators %>%
+    subset(
+      indicator_group_code == input$ind_group,
+      select = c('indicator_class_code',
+                 'indicator_class_ename')
+    ) %>%
+    unique() %>%
+    (function(x) {
+      y <- x$indicator_class_code
+      names(y) <- x$indicator_class_ename
+      return(y)
+    }) %>% sort()
+  selectInput(
+    inputId = 'ind_class',
+    label = 'Select an Indicator Class',
+    choices = ind_class
+  )
+})
+uiOutput('ind_class')
+
+ind_codes <- reactive({
+  validate(need(input$ind_group != "", "Loading the page..."))
+  validate(need(input$ind_class != "", "Loading the page..."))
+  inds <- subset(
+    indicators,
+    indicator_group_code == input$ind_group &
+      indicator_class_code == input$ind_class,
+    select = c('indicator_code', 'indicator_ename')
+  )
+  ind_codes <- inds$indicator_code
+  names(ind_codes) <- inds$indicator_ename
+  return(ind_codes)
+})
+
+ind_name <- reactive({
+  validate(need(input$ind != "", "Loading the page..."))
+  names(which(ind_codes() == input$ind))
+})
+
+ind_unit <- reactive({
+  validate(need(input$ind != "", "Loading the page..."))
+  dat %>% filter(indicator_code == input$ind) %>%
+    .$unit %>% unique() %>% extract(1)
+})
+
+output$ind <- renderUI({
+  selectInput(
+    inputId = 'ind',
+    label = 'Select an Indicator',
+    choices = ind_codes()
+  )
+})
+uiOutput('ind')
+
+# Set up data download
+data_for_dl <- reactive({
+  dat_ind() %>%
+    select(-Month, -ymd, -Year, -Quarter)
+})
+
+output$downloadCSV <- downloadHandler(
+  filename = 'data.csv', 
+  content = function(file) {
+    write_csv(data_for_dl(), file)
+  }
+)
+
+downloadLink('downloadCSV', label = 'Download CSV for active indicator')
+```
+
+**Map Settings**
+
+```{r}
+# map control slider
+quarter_list <- reactive({
+  dat_ind() %>%
+    select(time_period) %>%
+    unique() %>%
+    arrange(desc(time_period)) %>%
+    .[[1]] %>% as.character()
+})
+
+output$quarter_list <- renderUI({
+  selectInput(inputId = "quarter",
+              label = "Select a Quarter for Map Display",
+              choices = quarter_list())
+})
+uiOutput("quarter_list")
+```
+
+**Usage:**
+
+1. Select an Indicator Group
+1. Select an Indicator Class
+1. Select an Indicator Name
+
+**Created by**: [Yajie ZHU](https://yajiez.me).
+
+Explore Data
+======================================================================
+
+Row 
+-----------------------------------------------------------------------
+
+### Inequality Over Time
+
+```{r}
+output$boxplot <- renderHighchart({
+  validate(need(ind_name() != "", "Loading the page..."))
+  hcboxplot(x = dat_ind()$indicator_value,
+            var = dat_ind()$time_period,
+            outliers = FALSE) %>%
+    hc_chart(type = "column") %>%
+    hc_title(text = ind_name(), margin = 20, align = "center",
+             style = list(color = "#00acee", fontWeight = "bold",
+                          useHTML = TRUE)) %>%
+    hc_subtitle(text = paste0("Unit: ", ind_unit()), align = "center",
+                style = list(color = "#00acee", fontWeight = "bold"))
+})
+
+highchartOutput("boxplot")
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Spatial Distribution
+
+```{r}
+dat_map <- reactive({
+  validate(need(input$quarter != "", "Loading the page..."))
+  CHN_adm1@data <- dat_ind() %>%
+    filter(time_period == input$quarter) %>%
+    select(indicator_value, province_code) %>%
+    left_join(regions, by = c('province_code' = 'code')) %>%
+    select(indicator_value, name_en) %>%
+    mutate(name_en = as.character(name_en)) %>%
+    right_join(CHN_adm1@data, by = c('name_en' = 'NAME_1'))
+  #head(CHN_adm1@data)
+  return(CHN_adm1)
+})
+
+output$map <- renderLeaflet({
+  pal <- colorNumeric(viridis(999), NULL)
+  
+  map <- leaflet(dat_map()) %>%
+    addProviderTiles("CartoDB.Positron") %>%
+    setView(108, 38, zoom = 3) %>%
+    clearShapes() %>%
+    addPolygons(color = "Black", weight = 1,
+                fillColor = ~pal(indicator_value), 
+                fillOpacity = 0.7, 
+                layerId = ~OBJECTID,
+                label = ~stringr::str_c(name_en,' ',
+                            formatC(indicator_value, big.mark=',', format='d')),
+                        labelOptions = labelOptions(direction = 'auto',
+                                                   textsize = "16px"),
+                        highlightOptions = highlightOptions(
+                            color = '#00ff00', opacity = 1, weight = 2,
+                            fillOpacity = 1,
+                            bringToFront = TRUE, sendToBack = TRUE)) %>%
+    addPolygons(data = TWN_adm0, weight = 1,
+                color = 'Black', label = 'Taiwan: No Data') %>%
+    addLegend(position = 'bottomright', pal = pal, labels = palette(),
+              values = dat_map()$indicator_value, title = 'Value')
+  
+  map
+})
+
+# Click event for the map (used to generate time series chart)
+click_tract <- eventReactive(input$map_shape_click, {
+  x <- input$map_shape_click
+  y <- x$id
+  return(y)
+})
+
+observe({
+  req(click_tract()) # make sure click_tract() is not null
+  
+  # Add the clicked tract to the map in aqua, and remove when a new one is clicked
+  map <- leafletProxy('map') %>%
+    removeShape('htract') %>%
+    addPolygons(
+      data = dat_map()[dat_map()$OBJECTID == click_tract(),],
+      fill = FALSE,
+      color = '#FF00FF',
+      opacity = 1,
+      layerId = 'htract'
+    )
+})
+
+tract_data <- reactive({
+  # Fetch data for the clicked tract
+  validate(need(input$ind != "", "Loading the page..."))
+  province <- CHN_adm1@data[CHN_adm1@data$OBJECTID == click_tract(),"NAME_1"]
+  provinceCode <- regions[regions$name_en == province, "code"]
+  filter(dat, province_code == provinceCode,
+         indicator_code == input$ind) %>%
+    arrange(time_period) %>%
+    mutate(province_name = province)
+})
+
+leafletOutput('map')
+```
+
+### Time Series of Selected Province (**click on the map to show series**)
+
+```{r}
+bands <- reactive({
+  quantile(tract_data()$indicator_value, probs = c(0.25, 0.75, 1))
+})
+
+output$ts_plot <- renderHighchart(
+  highchart() %>%
+    hc_xAxis(categories = rev(quarter_list())) %>%
+    hc_add_series(name = ind_name(), type = "column", color = "#443A83",
+                  dataLabels = list(align = "center", enabled = FALSE),
+                  data = tract_data()$indicator_value) %>%
+    hc_yAxis(minorGridLineWidth = 0, gridLineWidth = 0,
+             plotBands = list(
+               list(from = bands()[[2]], to = bands()[[3]], 
+                    color = "rgba(68, 170, 213, 0.1)",
+                    label = list(text = "")),
+               list(from = bands()[[1]], to = bands()[[2]],
+                    color = "rgba(0, 0, 0, 0.1)",
+                    label = list(text = "", align = "right"))
+             )) %>%
+    hc_title(text = tract_data()$province_name[1], align = "center",
+             style = list(color = "#000000", 
+                          fontWeight = "bold",
+                          fontSize = "13px"))
+)
+
+highchartOutput("ts_plot")
+```
+
+About
+============================================================================
+
+This application is a tool for exploring the statistical data of China.
+
+Data source: [http://data.stats.gov.cn/](http://data.stats.gov.cn/).

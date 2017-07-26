@@ -1,0 +1,62 @@
+.section.sidebar {
+
+  background-color: white;
+  font-family: "Open-Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+
+}
+
+.js-irs-0 .irs-bar {
+border-top-color: #443A83;
+border-bottom-color: #443A83;
+}
+
+.js-irs-0 .irs-bar-edge {
+border-color: #443A83;
+}
+
+.js-irs-0 .irs-single, .js-irs-0 .irs-bar-edge, .js-irs-0 .irs-bar {
+background: #443A83;
+}
+
+.navbar-inverse {
+background-color: #443A83;
+border-color: #440154;
+}
+
+.navbar-inverse .navbar-brand {
+color: #a3a9ac;
+}
+
+a:hover, a:focus {
+color: #440154;
+text-decoration: underline;
+}
+
+a {
+color: #443A83;
+text-decoration: none;
+}
+
+.navbar-inverse .navbar-nav>li>a {
+color: #a3a9ac;
+}
+
+.chart-title {
+  font-weight: bold;
+  font-family: "Georgia";
+  font-size: 16px;
+  color: #000000;
+}
+
+.control-label {
+  font-weight: bold;
+  font-family: "Georgia";
+  font-size: 13px;
+  color: #111111;
+}
+
+p {
+  font-family: "Georgia";
+  font-size: 13px;
+  color: #000000;
+}
