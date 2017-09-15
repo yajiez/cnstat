@@ -1,4 +1,4 @@
-# cnstat
+# cnstat: A Shiny app to explore China Statistical Data
 
 ## Data Source
 
